@@ -1,0 +1,31 @@
+# Copy to xiao_config.yaml at the repository root.
+# Credentials are NOT stored here; see secrets.bat.
+
+hardware: LX06
+
+# Both default to false upstream. stream shortens time-to-first-token;
+# mute_xiaoai cuts the native answer off before our own reply.
+stream: true
+mute_xiaoai: true
+
+# Use the speaker's own TTS: no local audio server, no inbound firewall rule.
+tts: mi
+
+# Any OpenAI-compatible chat-completions endpoint works.
+# api_base must stop at the version prefix, NOT include /chat/completions:
+# the client appends that path itself.
+model: openai:YOUR_MODEL
+api_base: "https://YOUR_PROVIDER/v1"
+api_format: chat
+
+# Vendors that think before answering should be told not to; it is the single
+# biggest source of latency (~9s to first token with it on, ~1.2s off).
+# Remove extra_body entirely if your provider rejects unknown fields.
+gpt_options:
+  extra_body:
+    enable_thinking: false
+
+# Native TTS speaks one sentence per call, so short answers matter.
+prompt: "请用 100 字以内回答，只回答文字，不要链接，不要 Markdown 符号"
+
+# keyword defaults to ["帮我", "请"], leaving normal commands to XiaoAI.

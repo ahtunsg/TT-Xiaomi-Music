@@ -1,0 +1,7 @@
+@echo off
+rem Copy this file to music_env.bat at the repository root and fill in values.
+rem Folders under MUSIC_DIR are story sets; loose files are the music pool.
+rem MUSIC_DEVICE_ID is the speaker's deviceId (UUID), not the miotDID.
+set "MUSIC_DIR=D:\Music"
+set "MUSIC_DEVICE_ID=00000000-0000-0000-0000-000000000000"
+set "MUSIC_PORT=18899"

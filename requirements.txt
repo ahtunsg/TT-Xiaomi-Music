@@ -1,0 +1,5 @@
+xiaogpt==3.24
+miservice
+mutagen
+certifi
+PyYAML
