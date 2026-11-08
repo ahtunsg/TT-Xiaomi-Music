@@ -1,112 +1,114 @@
 # TT-Xiaomi-Music
 
-小爱音箱本地音乐 / 故事点播
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-给 [xiaogpt](https://github.com/yihong0618/xiaogpt) 加一层本地点播：把电脑上的 MP3 文件夹变成音箱可以点名的曲库和故事集，同时保留原厂的「小爱同学」唤醒词和全部原生功能。不刷机、不改固件、不替换唤醒词。
+Local music and story playback for XiaoAI speakers, built on top of [xiaogpt](https://github.com/yihong0618/xiaogpt). It turns a folder of MP3s on your PC into a library the speaker can play by name, while keeping the original 「小爱同学」 wake word and every native feature intact. No firmware flashing, no firmware modification, no wake-word replacement.
 
-在 LX06（小爱音箱 Pro）上实测通过：620 首歌的点播、随机连播、按文件夹分集连播、断点续播、语音停止/切歌。
+Tested on an LX06 (XiaoAI Speaker Pro) with a 620-track library: title lookup, shuffled continuous playback, folder-based story sets played episode by episode, resume after stopping, and voice stop / track skip.
 
-## 它解决什么
+## Why this exists
 
-xiaogpt 本身是「大模型问答旁路」：轮询小米云对话记录，命中关键词就把问题交给 LLM，再用音箱原生 TTS 回答。本项目复用这条旁路，但不走大模型——命中音乐前缀时直接查本地曲库，通过 DLNA 把本机文件推给音箱。
+xiaogpt is an LLM side-channel: it polls Xiaomi cloud conversation records, and when a keyword matches it sends the question to an LLM and speaks the answer through the speaker's native TTS. This project reuses that side-channel without the LLM. When the music prefix is detected, it queries a local library and pushes a local file to the speaker over DLNA.
 
 ```
-说出「小爱同学 小爱音乐 播放晴天」
-  -> 设备唤醒，ASR 结果写入小米云对话记录
-  -> xiaogpt 轮询到新记录，发现前缀「小爱音乐」
-  -> 打断原生回答，交给 music_bridge.handle_command()
-  -> 曲库检索 / 队列计算 / 进度落盘
-  -> miservice.play_by_url() 推一个本机 HTTP 地址给音箱
-  -> 音箱直接来本机 music_server.py 拉文件（支持 Range / 中文名 / 子目录）
+Say 「小爱同学 小爱音乐 播放晴天」
+  -> wake word triggers; ASR result is written to Xiaomi cloud conversation records
+  -> xiaogpt polls the new record and sees the 「小爱音乐」 prefix
+  -> native answer is cut off; control goes to music_bridge.handle_command()
+  -> library lookup / queue calculation / progress saved to disk
+  -> miservice.play_by_url() hands the speaker a URL on this PC
+  -> the speaker fetches the file directly from music_server.py (Range / non-ASCII names / subfolders)
 ```
 
-## 目录规则
+Voice commands are Chinese because the speaker's ASR is Chinese. The phrases in the tables below are the literal words to say.
 
-曲库根目录由 `MUSIC_DIR` 指定：
+## Library layout
 
-- 根目录下的散装音频 = 曲库，参与随机播放和点歌
-- 根目录下的每个子文件夹 = 一个故事系列，文件夹名就是系列名，按自然排序逐集连播
-- 点播单曲时，队列是整份散装曲库，从点中的那首开始，所以「下一首」可以接着走
-- 随机播放只洗牌根目录的散装音频，不会把故事集的第 37 集插进两首歌之间
+The library root is set by `MUSIC_DIR`:
 
-支持 mp3 / m4a / aac / flac / wav / ogg / opus。标题和歌手从 ID3 读取，读不到就用文件名。扫描结果缓存在内存和 `music_index.json`，620 首曲库的热路径约 1 毫秒，新进程首扫约 60 毫秒。
+- Loose audio files directly under the root form the music pool, used for shuffle and title lookup
+- Each subfolder under the root is a story series; the folder name is the series name, and episodes play in natural sort order
+- Looking up a single track queues the entire loose-file pool starting at the matched track, so 「下一首」 keeps going
+- Shuffle only shuffles loose files; episode 37 of a story set will never land between two songs
 
-## 部署
+Supported formats: mp3 / m4a / aac / flac / wav / ogg / opus. Title and artist come from ID3 tags, falling back to the file name. Scan results are cached in memory and in `music_index.json`: about 1 ms on the hot path for 620 tracks, about 60 ms for the first scan in a new process.
 
-前置：一台 7×24 开机的 Windows 电脑、和音箱在同一个局域网、Python 3.11+、xiaogpt 3.24、`~/.mi.token`（用 miservice 登录小米账号得到）。
+## Setup
 
-1. 复制本仓库，建 venv 并安装依赖：
+Requirements: a Windows PC running 24/7 on the same LAN as the speaker, Python 3.11+, xiaogpt 3.24, and `~/.mi.token` (obtained by signing in to a Xiaomi account through miservice).
+
+1. Clone the repository, create a venv and install dependencies:
 
    ```
    python -m venv .venv
    .venv\Scripts\pip install -r requirements.txt
    ```
 
-2. 把 `examples/` 里的样例复制到仓库根目录，按实际情况填写：
+2. Copy the samples from `examples/` to the repository root and fill them in:
 
-   - `music_env.bat`：只需一行 `set "MUSIC_DIR=你的曲库路径"`
-   - `secrets.bat`：小米账号（仅首次登录需要）、`MI_DID`、大模型的 API key
-   - `xiao_config.yaml`：xiaogpt 的模型与硬件配置
+   - `music_env.bat`: at minimum `set "MUSIC_DIR=path\to\your\library"`
+   - `secrets.bat`: Xiaomi credentials (first login only), `MI_DID`, and the LLM API key
+   - `xiao_config.yaml`: xiaogpt model and hardware settings
 
-3. 取得音箱的 `deviceId`（形如 UUID），写进 `music_env.bat` 的 `MUSIC_DEVICE_ID`。可用 `miservice mina` 列出设备，或从 UPnP 描述里读。
+3. Get the speaker's `deviceId` (a UUID) and set `MUSIC_DEVICE_ID` in `music_env.bat`. Use `miservice mina` to list devices, or read it from the UPnP description.
 
-4. 应用补丁并启动：
+4. Apply the patch and start:
 
    ```
-   patch_xiaogpt.py 由 scripts\start_xiaogpt.bat 自动执行
+   patch_xiaogpt.py is applied automatically by scripts\start_xiaogpt.bat
    scripts\run_service.bat
    ```
 
-   `run_service.bat` 同时拉起文件服务和 xiaogpt。补丁是幂等的，重复运行不会重复插入代码。
+   `run_service.bat` starts both the file server and xiaogpt. The patch is idempotent; running it again will not duplicate code.
 
-5. 若要开机自启，把 `scripts\start_hidden.vbs` 的快捷方式放进 Windows 启动文件夹。
+5. For autostart, put a shortcut to `scripts\start_hidden.vbs` in the Windows Startup folder.
 
-`patch_xiaogpt.py` 做四件事：关闭写死的等待提示音、跳过重复的播放状态查询、把轮询间隔从 1 秒缩到 0.4 秒、把音乐前缀接入主循环并拦截播放中的短指令。
+`patch_xiaogpt.py` does four things: removes the hard-coded waiting tone, skips redundant playback-status calls, shortens the poll interval from 1 s to 0.4 s, and hooks the music prefix plus short in-playback commands into the main loop.
 
-## 语音指令
+## Voice commands
 
-所有播放类指令都要带前缀，默认「小爱音乐」；`XIAOGPT_MUSIC_PREFIX` 可以改。唤醒词「小爱同学」不能省——设备只在听到唤醒词后才开始收音，唤醒前的字根本不进 ASR，这是设备机制决定的。
+Playback commands need the prefix, 「小爱音乐」 by default; change it with `XIAOGPT_MUSIC_PREFIX`. The wake word 「小爱同学」 is mandatory: the speaker only starts listening after the wake word, so anything said before it never reaches ASR. This is a device limitation.
 
-| 说法 | 效果 |
+| Say | Effect |
 | --- | --- |
-| 小爱音乐 播放 海阔天空 | 按标题片段点播单曲 |
-| 小爱音乐 播放 小鸡多多 | 按文件夹名播放整个系列 |
-| 小爱音乐 小鸡多多第5集 | 从指定集开始（也认「第五集」） |
-| 小爱音乐 第5集 | 在当前队列里跳到第 5 集 |
-| 小爱音乐 播放音乐 / 随机 / 随便听听 / 来点音乐 | 根目录曲库随机连播 |
-| 小爱音乐 继续 | 续播；系列按集数，单曲按标题 |
-| 小爱音乐 停止 | 停止并记下进度 |
-| 小爱音乐 有几首 / 列表 | 报曲库数量 |
+| 小爱音乐 播放 海阔天空 | Look up a single track by title fragment |
+| 小爱音乐 播放 小鸡多多 | Play a whole series by folder name |
+| 小爱音乐 小鸡多多第5集 | Start at episode 5 (Chinese numerals also work) |
+| 小爱音乐 第5集 | Jump to episode 5 in the current queue |
+| 小爱音乐 播放音乐 / 随机 / 随便听听 / 来点音乐 | Shuffle the root-level music pool and play continuously |
+| 小爱音乐 继续 | Resume: by episode for a series, by title for a single track |
+| 小爱音乐 停止 | Stop and save progress |
+| 小爱音乐 有几首 / 列表 | Report the library size |
 
-控制类指令可以不带前缀，直接说「小爱同学 停止」即可，前提是当前播放由本程序发起且 30 分钟内有活动。已收录的常见说法：
+Control commands need no prefix — just say 「小爱同学 停止」 — as long as playback was started by this program and there was activity within the last 30 minutes. Accepted phrases:
 
-- 停止：停止、停止播放、暂停、暂停一下、停、停下、停一下、别放了、关掉、关闭
-- 继续：继续、继续播放、继续播、接着、接着放、接着听
-- 下一首：下一首、下一集、下一曲、换一首、换一个、切歌
-- 上一首：上一首、上一集、上一曲、前一首
+- Stop: 停止、停止播放、暂停、暂停一下、停、停下、停一下、别放了、关掉、关闭
+- Resume: 继续、继续播放、继续播、接着、接着放、接着听
+- Next: 下一首、下一集、下一曲、换一首、换一个、切歌
+- Previous: 上一首、上一集、上一曲、前一首
 
-## 已知限制
+## Known limitations
 
-LX06 的 `player_get_status` 无论播放还是空闲都恒定返回 `status=1`，拿不到进度，也判断不出是否在播。因此换集只能按文件时长定时触发。由此带来两个副作用：
+On the LX06, `player_get_status` returns `status=1` whether the speaker is playing or idle. There is no playback position and no way to tell if audio is running, so episode changes are driven by a timer based on file duration. Two consequences:
 
-- 设备拿到单个 URL 后会自己循环，所以队列播完必须显式调用 `player_stop`，否则最后一集会无限重播
-- 用手机 App 或物理按键暂停，本程序感知不到，到点仍会播下一集；用语音说「暂停」会被拦截，能真正停住
+- Given a single URL the speaker loops it on its own, so `player_stop` must be called when the queue ends; otherwise the last episode repeats forever
+- Pausing from the phone app or with the physical buttons is invisible to this program, so the next episode still starts on schedule. Saying 「暂停」 is intercepted and really stops playback
 
-另外，语音指令的匹配依赖小米云对话记录，天然有一两秒延迟；这是旁路架构的固有成本。想消除它只能走刷机方案（如 Open-XiaoAI），本项目刻意不碰。
+Voice commands also inherit a one-to-two-second delay because they depend on Xiaomi cloud conversation records. That is the cost of a side-channel architecture. Removing it requires a firmware-level approach such as Open-XiaoAI, which this project deliberately avoids.
 
-## 安全与隐私
+## Security and privacy
 
-仓库里不含任何真实凭据、设备标识、局域网地址或曲库内容。以下内容都通过环境变量或本地文件提供，且已被 `.gitignore` 排除：
+The repository contains no real credentials, device identifiers, LAN addresses, or audio files. Everything below is supplied through environment variables or local files and is excluded by `.gitignore`:
 
-- `secrets.bat`（API key、小米账号、`MI_DID`）
-- `~/.mi.token`（小米登录态）
-- `music_state.json`、`music_index.json`（播放进度、曲库清单）
-- 各类日志、音乐文件本身
+- `secrets.bat` (API key, Xiaomi account, `MI_DID`)
+- `~/.mi.token` (Xiaomi login session)
+- `music_state.json`, `music_index.json` (playback progress and library index)
+- Logs and the audio files themselves
 
-公开发布前请再确认一遍 `MUSIC_DEVICE_ID` 没有写死在代码或配置样例里。
+Before publishing, double-check that `MUSIC_DEVICE_ID` is not hard-coded in the code or in the sample configs.
 
-## 致谢
+## Credits
 
-旁路架构来自 [xiaogpt](https://github.com/yihong0618/xiaogpt)，小米云接口来自 `miservice`。本项目只在其上叠加本地曲库能力。
+The side-channel architecture comes from [xiaogpt](https://github.com/yihong0618/xiaogpt); Xiaomi cloud access comes from `miservice`. This project only adds a local library layer on top.
 
-本仓库按 MIT 许可证发布，许可证全文见仓库根目录的 LICENSE 文件。
+Released under the MIT License. See LICENSE in the repository root.
